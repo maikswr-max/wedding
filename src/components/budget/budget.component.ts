@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, signal, effect, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CommonModule, CurrencyPipe } from '@angular/common';
+import { AuthService } from '../../services/auth.service';
 
 interface BudgetItem {
   id: number;
@@ -89,19 +90,54 @@ interface BudgetItem {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class BudgetComponent {
-  private nextId = 4;
-  items = signal<BudgetItem[]>([
-    { id: 1, category: 'Venue', estimated: 10000, actual: 12000 },
-    { id: 2, category: 'Catering', estimated: 8000, actual: 7500 },
-    { id: 3, category: 'Photography', estimated: 3000, actual: 3000 },
-    { id: 4, category: 'Dress & Attire', estimated: 2500, actual: 0 },
-  ]);
+  private authService = inject(AuthService);
+  private currentUser = this.authService.currentUser;
+  private storageKey = computed(() => `wedding_budget_items_${this.currentUser()}`);
 
+  private nextId = 0;
+  items = signal<BudgetItem[]>([]);
   newItem = { category: '', estimated: 0, actual: 0 };
 
   totalEstimated = computed(() => this.items().reduce((sum, item) => sum + item.estimated, 0));
   totalActual = computed(() => this.items().reduce((sum, item) => sum + item.actual, 0));
   remainingBudget = computed(() => this.totalEstimated() - this.totalActual());
+
+  constructor() {
+    effect(() => {
+      this.items.set(this.loadItems());
+      this.nextId = this.items().reduce((max, item) => Math.max(max, item.id), -1) + 1;
+    }, { allowSignalWrites: true });
+
+    effect(() => {
+      if (this.currentUser()) {
+        localStorage.setItem(this.storageKey(), JSON.stringify(this.items()));
+      }
+    });
+  }
+  
+  private loadItems(): BudgetItem[] {
+    if (!this.currentUser()) return this.getDefaultItems();
+
+    const savedItems = localStorage.getItem(this.storageKey());
+    if(savedItems) {
+      try {
+        return JSON.parse(savedItems);
+      } catch(e) {
+        console.error('Error parsing budget items from localStorage', e);
+        return this.getDefaultItems();
+      }
+    }
+    return this.getDefaultItems();
+  }
+  
+  private getDefaultItems(): BudgetItem[] {
+    return [
+      { id: 1, category: 'Venue', estimated: 10000, actual: 12000 },
+      { id: 2, category: 'Catering', estimated: 8000, actual: 7500 },
+      { id: 3, category: 'Photography', estimated: 3000, actual: 3000 },
+      { id: 4, category: 'Dress & Attire', estimated: 2500, actual: 0 },
+    ];
+  }
 
   addItem() {
     if (!this.newItem.category || this.newItem.estimated <= 0) return;

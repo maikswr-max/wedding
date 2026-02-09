@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, signal, effect, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
+import { AuthService } from '../../services/auth.service';
 
 interface Task {
   id: number;
@@ -74,10 +75,13 @@ interface Task {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TodoListComponent {
+  private authService = inject(AuthService);
+  private currentUser = this.authService.currentUser;
+  private storageKey = computed(() => `wedding_tasks_${this.currentUser()}`);
+  
   newTaskText = '';
   private nextId = 0;
-
-  tasks = signal<Task[]>(this.getInitialTasks());
+  tasks = signal<Task[]>([]);
 
   progress = computed(() => {
     const taskList = this.tasks();
@@ -85,8 +89,36 @@ export class TodoListComponent {
     const completedCount = taskList.filter(t => t.completed).length;
     return Math.round((completedCount / taskList.length) * 100);
   });
+  
+  constructor() {
+    effect(() => {
+      this.tasks.set(this.loadTasks());
+      this.nextId = this.tasks().reduce((max, task) => Math.max(max, task.id), -1) + 1;
+    }, { allowSignalWrites: true });
 
-  getInitialTasks(): Task[] {
+    effect(() => {
+      if (this.currentUser()) {
+        localStorage.setItem(this.storageKey(), JSON.stringify(this.tasks()));
+      }
+    });
+  }
+
+  private loadTasks(): Task[] {
+    if (!this.currentUser()) return this.getDefaultTasks();
+
+    const savedTasks = localStorage.getItem(this.storageKey());
+    if (savedTasks) {
+      try {
+        return JSON.parse(savedTasks);
+      } catch (e) {
+        console.error('Error parsing tasks from localStorage', e);
+        return this.getDefaultTasks();
+      }
+    }
+    return this.getDefaultTasks();
+  }
+  
+  private getDefaultTasks(): Task[] {
       const initialTasks = [
         { text: 'Set a budget', completed: true },
         { text: 'Create guest list', completed: true },

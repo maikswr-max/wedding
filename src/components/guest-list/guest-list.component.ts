@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, signal, effect, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
+import { AuthService } from '../../services/auth.service';
 
 type RsvpStatus = 'Pending' | 'Attending' | 'Declined';
 interface Guest {
@@ -108,14 +109,12 @@ interface Guest {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class GuestListComponent {
-  private nextId = 4;
-  guests = signal<Guest[]>([
-    { id: 1, name: 'John Doe', status: 'Attending', side: 'Groom', notes: '' },
-    { id: 2, name: 'Jane Smith', status: 'Attending', side: 'Bride', notes: '' },
-    { id: 3, name: 'Peter Jones', status: 'Pending', side: 'Bride', notes: '' },
-    { id: 4, name: 'Mary Williams', status: 'Declined', side: 'Groom', notes: '' },
-  ]);
+  private authService = inject(AuthService);
+  private currentUser = this.authService.currentUser;
+  private storageKey = computed(() => `wedding_guests_${this.currentUser()}`);
 
+  private nextId = 0;
+  guests = signal<Guest[]>([]);
   newGuest = { name: '', side: 'Bride' as const, status: 'Pending' as const };
 
   guestStats = computed(() => {
@@ -127,6 +126,43 @@ export class GuestListComponent {
       pending: guestList.filter(g => g.status === 'Pending').length,
     };
   });
+  
+  constructor() {
+    effect(() => {
+      this.guests.set(this.loadGuests());
+      this.nextId = this.guests().reduce((max, guest) => Math.max(max, guest.id), -1) + 1;
+    }, { allowSignalWrites: true });
+
+    effect(() => {
+      if (this.currentUser()) {
+        localStorage.setItem(this.storageKey(), JSON.stringify(this.guests()));
+      }
+    });
+  }
+  
+  private loadGuests(): Guest[] {
+    if (!this.currentUser()) return this.getDefaultGuests();
+
+    const savedGuests = localStorage.getItem(this.storageKey());
+    if(savedGuests) {
+      try {
+        return JSON.parse(savedGuests);
+      } catch(e) {
+        console.error('Error parsing guests from localStorage', e);
+        return this.getDefaultGuests();
+      }
+    }
+    return this.getDefaultGuests();
+  }
+  
+  private getDefaultGuests(): Guest[] {
+    return [
+      { id: 1, name: 'John Doe', status: 'Attending', side: 'Groom', notes: '' },
+      { id: 2, name: 'Jane Smith', status: 'Attending', side: 'Bride', notes: '' },
+      { id: 3, name: 'Peter Jones', status: 'Pending', side: 'Bride', notes: '' },
+      { id: 4, name: 'Mary Williams', status: 'Declined', side: 'Groom', notes: '' },
+    ];
+  }
 
   addGuest() {
     if (this.newGuest.name.trim() === '') return;
